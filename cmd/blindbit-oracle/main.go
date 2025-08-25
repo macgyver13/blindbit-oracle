@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"path"
+	"time"
 
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/setavenger/blindbit-oracle/internal/config"
 	"github.com/setavenger/blindbit-oracle/internal/database/dbpebble"
 	"github.com/setavenger/blindbit-oracle/internal/indexer"
+	"github.com/setavenger/blindbit-oracle/internal/monitoring"
 	"github.com/setavenger/blindbit-oracle/internal/server"
 	v2 "github.com/setavenger/blindbit-oracle/internal/server/v2"
 )
@@ -131,6 +133,14 @@ func main() {
 	}
 	store := dbpebble.NewStore(db)
 
+	// Initialize PebbleDB monitoring
+	pebbleMonitor := monitoring.NewPebbleMonitor(db, 10*time.Second, 1000)
+	pebbleMonitor.Start()
+	defer pebbleMonitor.Stop()
+
+	// Start bottleneck detection (will be initialized after ctx is created)
+	var bottleneckDetectionStarted bool
+
 	//moved into go routine such that the interrupt signal will apply properly
 	go func() {
 		// so we can start fetching data while not fully synced.
@@ -152,6 +162,33 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Start bottleneck detection now that ctx is available
+	if !bottleneckDetectionStarted {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					bottlenecks := pebbleMonitor.DetectBottlenecks()
+					if len(bottlenecks) > 0 {
+						logging.L.Warn().
+							Strs("bottlenecks", bottlenecks).
+							Msg("performance_bottlenecks_detected")
+					}
+
+					// Log performance summary every 5 minutes
+					summary := pebbleMonitor.GetSummary()
+					logging.L.Info().Msg(summary)
+				}
+			}
+		}()
+		bottleneckDetectionStarted = true
+	}
 
 	// index builder
 	go func() {
