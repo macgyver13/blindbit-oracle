@@ -12,6 +12,10 @@ import (
 
 var (
 	LogLevel = "info"
+	// PebbleWriteOptimized enables maximum write performance mode
+	// Disables WAL and delays compactions for fastest initial sync
+	// WARNING: No crash safety when enabled
+	PebbleWriteOptimized = true
 )
 
 const (

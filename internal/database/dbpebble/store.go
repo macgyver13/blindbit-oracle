@@ -18,12 +18,19 @@ type Store struct {
 }
 
 func NewStore(db *pebble.DB) *Store {
+	// WRITE PERFORMANCE: Increase batch size from 200 to 500 blocks
+	// Reduces commit overhead for write-heavy initial sync workloads
+	batchSize := 500
+	logging.L.Info().
+		Int("batch_size", batchSize).
+		Msg("PebbleDB Store: Using large batch size for write performance")
+	
 	return &Store{
 		DB:           db,
 		dbBatch:      db.NewBatch(),
 		batchCounter: 0,
 		batchSync:    new(sync.Mutex),
-		batchSize:    200,
+		batchSize:    batchSize,
 	}
 }
 
